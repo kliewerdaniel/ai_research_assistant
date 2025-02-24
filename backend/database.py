@@ -1,6 +1,12 @@
 from neo4j import GraphDatabase, Driver
+from neo4j.exceptions import ServiceUnavailable
 from typing import Optional, List, Dict, Any
+from datetime import datetime
+import time
 from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+
+MAX_RETRIES = 30
+RETRY_INTERVAL = 2  # seconds
 
 class DatabaseManager:
     _instance = None
@@ -14,10 +20,23 @@ class DatabaseManager:
     def __init__(self):
         # Initialize only if not already initialized
         if not self._driver:
-            self._driver = GraphDatabase.driver(
-                NEO4J_URI,
-                auth=(NEO4J_USER, NEO4J_PASSWORD)
-            )
+            retries = 0
+            while retries < MAX_RETRIES:
+                try:
+                    self._driver = GraphDatabase.driver(
+                        NEO4J_URI,
+                        auth=(NEO4J_USER, NEO4J_PASSWORD)
+                    )
+                    # Test the connection
+                    self._driver.verify_connectivity()
+                    print("Successfully connected to Neo4j database")
+                    break
+                except ServiceUnavailable as e:
+                    retries += 1
+                    if retries == MAX_RETRIES:
+                        raise Exception(f"Failed to connect to Neo4j after {MAX_RETRIES} attempts: {str(e)}")
+                    print(f"Neo4j not ready (attempt {retries}/{MAX_RETRIES}), retrying in {RETRY_INTERVAL} seconds...")
+                    time.sleep(RETRY_INTERVAL)
 
     def close(self):
         """Close the database connection."""
@@ -34,29 +53,31 @@ class DatabaseManager:
             print(f"Connection error: {e}")
             return False
 
-    def add_article(self, title: str, url: str, summary: str, date: str) -> Dict[str, Any]:
+    def add_article(self, title: str, content: str, metadata: Dict = None) -> Dict[str, Any]:
         """
         Add an article node to the database.
         
         Args:
             title: The article title
-            url: The article URL
-            summary: The article summary
-            date: The publication date
+            content: The article content
+            metadata: Optional metadata dictionary
         
         Returns:
             Dictionary containing the created article's properties
         """
+        if metadata is None:
+            metadata = {}
+        
         query = """
         MERGE (a:Article {title: $title})
-        SET a.url = $url,
-            a.summary = $summary,
-            a.date = $date
+        SET a.content = $content,
+            a.metadata = $metadata,
+            a.timestamp = datetime()
         RETURN a
         """
         try:
             with self._driver.session() as session:
-                result = session.run(query, title=title, url=url, summary=summary, date=date)
+                result = session.run(query, title=title, content=content, metadata=metadata)
                 record = result.single()
                 return dict(record["a"])
         except Exception as e:

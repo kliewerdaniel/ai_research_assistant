@@ -6,8 +6,10 @@ from torch_geometric.data import Data
 from typing import List, Dict, Tuple, Optional, Union
 from sklearn.preprocessing import StandardScaler
 from transformers import AutoTokenizer, AutoModel
-from node2vec import Node2Vec
-import community.community_louvain as community_louvain
+import random
+import torch.nn as nn
+import torch.nn.functional as F
+import community as community_louvain
 
 class GraphProcessor:
     def __init__(self, db_manager):
@@ -130,23 +132,87 @@ class GraphProcessor:
         undirected_graph = self.graph.to_undirected()
         return community_louvain.best_partition(undirected_graph)
 
+    def _random_walk(self, start_node: int, walk_length: int) -> List[int]:
+        """Generate a random walk starting from start_node"""
+        walk = [start_node]
+        for _ in range(walk_length - 1):
+            cur = walk[-1]
+            neighbors = list(self.graph.neighbors(cur))
+            if not neighbors:
+                break
+            # Use edge weights for transition probabilities
+            weights = [self.graph[cur][nbr].get('weight', 1.0) for nbr in neighbors]
+            total = sum(weights)
+            weights = [w/total for w in weights]
+            next_node = random.choices(neighbors, weights=weights)[0]
+            walk.append(next_node)
+        return walk
+
     def generate_node_embeddings(self, dimensions: int = 128) -> Dict[int, np.ndarray]:
-        """Generate node embeddings using Node2Vec"""
-        node2vec = Node2Vec(
-            self.graph,
-            dimensions=dimensions,
-            walk_length=30,
-            num_walks=200,
-            workers=4,
-            weight_key='weight'
-        )
-        model = node2vec.fit()
+        """Generate node embeddings using random walks and skip-gram"""
+        num_walks = 10
+        walk_length = 80
         
-        # Store embeddings in dictionary
-        self.node_embeddings = {
-            node: model.wv[node] 
-            for node in self.graph.nodes()
-        }
+        # Generate random walks
+        walks = []
+        for node in self.graph.nodes():
+            for _ in range(num_walks):
+                walks.append(self._random_walk(node, walk_length))
+        
+        # Create node to index mapping
+        node_to_idx = {node: idx for idx, node in enumerate(self.graph.nodes())}
+        idx_to_node = {idx: node for node, idx in node_to_idx.items()}
+        vocab_size = len(node_to_idx)
+        
+        # Convert walks to tensor format
+        walk_tensors = []
+        for walk in walks:
+            indices = [node_to_idx[node] for node in walk]
+            walk_tensors.extend(
+                (indices[i], indices[i+1])
+                for i in range(len(indices)-1)
+            )
+        
+        # Create skip-gram model
+        class SkipGramModel(nn.Module):
+            def __init__(self, vocab_size: int, embedding_dim: int):
+                super().__init__()
+                self.embeddings = nn.Embedding(vocab_size, embedding_dim)
+                self.linear = nn.Linear(embedding_dim, vocab_size)
+                
+            def forward(self, inputs):
+                embeds = self.embeddings(inputs)
+                out = self.linear(embeds)
+                return F.log_softmax(out, dim=1)
+        
+        model = SkipGramModel(vocab_size, dimensions)
+        optimizer = torch.optim.Adam(model.parameters())
+        
+        # Train the model
+        model.train()
+        batch_size = 32
+        for epoch in range(5):
+            for i in range(0, len(walk_tensors), batch_size):
+                batch = walk_tensors[i:i+batch_size]
+                if not batch:
+                    continue
+                inputs = torch.tensor([p[0] for p in batch])
+                targets = torch.tensor([p[1] for p in batch])
+                
+                optimizer.zero_grad()
+                log_probs = model(inputs)
+                loss = F.nll_loss(log_probs, targets)
+                loss.backward()
+                optimizer.step()
+        
+        # Extract embeddings
+        with torch.no_grad():
+            embeddings = model.embeddings.weight.numpy()
+            self.node_embeddings = {
+                idx_to_node[i]: embeddings[i]
+                for i in range(vocab_size)
+            }
+        
         return self.node_embeddings
 
     def hybrid_search(self, query_embedding: np.ndarray, 
