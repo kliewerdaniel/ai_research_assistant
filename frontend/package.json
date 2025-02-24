@@ -1,0 +1,9 @@
+{
+  "name": "ai-summarizer-extension",
+  "version": "1.0.0",
+  "description": "Chrome extension for AI-powered text summarization",
+  "type": "module",
+  "dependencies": {
+    "@xenova/transformers": "^2.15.0"
+  }
+}

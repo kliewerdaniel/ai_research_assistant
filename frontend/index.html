@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Knowledge Graph Dashboard</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            margin-bottom: 20px;
+        }
+        .search-container {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        #search-input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        select {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            background-color: white;
+            cursor: pointer;
+        }
+        select:hover {
+            border-color: #4CAF50;
+        }
+        #graph-container {
+            height: 600px;
+            border: 1px solid #ddd;
+            background-color: white;
+            border-radius: 4px;
+        }
+        .legend {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .legend-item {
+            display: inline-block;
+            margin-right: 20px;
+        }
+        .legend-color {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            margin-right: 5px;
+            border-radius: 50%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Knowledge Graph Dashboard</h1>
+        </div>
+        
+        <div class="search-container">
+            <input type="text" id="search-input" placeholder="Search for articles, authors, or concepts...">
+            <button onclick="searchGraph()">Search</button>
+            <button onclick="resetGraph()">Reset</button>
+            <select id="export-format">
+                <option value="markdown">Markdown</option>
+                <option value="latex">LaTeX</option>
+            </select>
+            <button onclick="exportSelected()">Export Selected</button>
+        </div>
+
+        <div id="graph-container"></div>
+
+        <div class="legend">
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #97C2FC;"></span>
+                Article
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #FFB6C1;"></span>
+                Author
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #98FB98;"></span>
+                Concept
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Sample data structure - this would typically come from your backend
+        const sampleData = {
+            nodes: [
+                { id: 1, label: 'Article 1', group: 'article' },
+                { id: 2, label: 'Author 1', group: 'author' },
+                { id: 3, label: 'Concept: AI', group: 'concept' },
+                { id: 4, label: 'Article 2', group: 'article' },
+                { id: 5, label: 'Author 2', group: 'author' },
+                { id: 6, label: 'Concept: ML', group: 'concept' }
+            ],
+            edges: [
+                { from: 1, to: 2 },
+                { from: 1, to: 3 },
+                { from: 2, to: 4 },
+                { from: 4, to: 5 },
+                { from: 4, to: 6 },
+                { from: 3, to: 6 }
+            ]
+        };
+
+        // Network configuration
+        const container = document.getElementById('graph-container');
+        
+        const options = {
+            nodes: {
+                shape: 'dot',
+                size: 20,
+                font: {
+                    size: 14
+                },
+                borderWidth: 2,
+                shadow: true
+            },
+            edges: {
+                width: 2,
+                smooth: {
+                    type: 'continuous'
+                }
+            },
+            groups: {
+                article: {
+                    color: { background: '#97C2FC', border: '#4785F4' }
+                },
+                author: {
+                    color: { background: '#FFB6C1', border: '#FF69B4' }
+                },
+                concept: {
+                    color: { background: '#98FB98', border: '#3CB371' }
+                }
+            },
+            physics: {
+                stabilization: true,
+                barnesHut: {
+                    gravitationalConstant: -80000,
+                    springConstant: 0.001,
+                    springLength: 200
+                }
+            }
+        };
+
+        // Create network
+        const network = new vis.Network(container, sampleData, options);
+
+        // Search functionality
+        function searchGraph() {
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            
+            if (!searchTerm) {
+                resetGraph();
+                return;
+            }
+
+            const matchingNodes = sampleData.nodes.filter(node => 
+                node.label.toLowerCase().includes(searchTerm)
+            );
+
+            const matchingNodeIds = new Set(matchingNodes.map(node => node.id));
+            
+            // Add connected nodes
+            sampleData.edges.forEach(edge => {
+                if (matchingNodeIds.has(edge.from)) {
+                    matchingNodeIds.add(edge.to);
+                }
+                if (matchingNodeIds.has(edge.to)) {
+                    matchingNodeIds.add(edge.from);
+                }
+            });
+
+            // Update network with matching nodes and their connections
+            const filteredNodes = sampleData.nodes.filter(node => 
+                matchingNodeIds.has(node.id)
+            );
+            const filteredEdges = sampleData.edges.filter(edge =>
+                matchingNodeIds.has(edge.from) && matchingNodeIds.has(edge.to)
+            );
+
+            network.setData({
+                nodes: filteredNodes,
+                edges: filteredEdges
+            });
+
+            // Focus on the matching nodes
+            if (matchingNodes.length > 0) {
+                network.fit({
+                    nodes: matchingNodes.map(node => node.id),
+                    animation: true
+                });
+            }
+        }
+
+        function resetGraph() {
+            network.setData(sampleData);
+            document.getElementById('search-input').value = '';
+            network.fit();
+        }
+
+        // Initial network setup and event binding
+        network.once('stabilized', function() {
+            // Configure selection options
+            network.setOptions({
+                interaction: {
+                    hover: true,
+                    multiselect: true,
+                    selectConnectedEdges: false
+                },
+                nodes: {
+                    ...options.nodes,
+                    chosen: {
+                        node: function(values, id, selected, hovering) {
+                            values.borderWidth = selected ? 4 : 2;
+                            values.shadowSize = selected ? 10 : 5;
+                            values.shadowColor = selected ? 'rgba(76,175,80,0.3)' : 'rgba(0,0,0,0.2)';
+                        }
+                    }
+                }
+            });
+
+            // Bind selection events
+            network.on("selectNode", function(params) {
+                const nodeId = params.nodes[0];
+                const node = sampleData.nodes.find(n => n.id === nodeId);
+                if (node) {
+                    console.log('Selected node:', node.label, 'Type:', node.group);
+                }
+            });
+
+            network.on("deselectNode", function(params) {
+                const nodeId = params.previousSelection.nodes[0];
+                const node = sampleData.nodes.find(n => n.id === nodeId);
+                if (node) {
+                    console.log('Deselected node:', node.label, 'Type:', node.group);
+                }
+            });
+
+            // Initial fit
+            network.fit();
+        });
+
+        // Export functionality
+        function exportSelected() {
+            const selectedNodes = network.getSelectedNodes();
+            if (selectedNodes.length === 0) {
+                alert('Please select at least one node to export');
+                return;
+            }
+
+            const format = document.getElementById('export-format').value;
+            
+            // Get selected nodes and their direct connections
+            const connectedNodes = new Set(selectedNodes);
+            const relevantEdges = [];
+            
+            sampleData.edges.forEach(edge => {
+                if (selectedNodes.includes(edge.from) || selectedNodes.includes(edge.to)) {
+                    connectedNodes.add(edge.from);
+                    connectedNodes.add(edge.to);
+                    relevantEdges.push(edge);
+                }
+            });
+
+            const exportData = {
+                nodes: sampleData.nodes.filter(node => connectedNodes.has(node.id)),
+                edges: relevantEdges,
+                selected: selectedNodes // Track originally selected nodes
+            };
+
+            try {
+                let content = '';
+                if (format === 'markdown') {
+                    content = generateMarkdown(exportData);
+                } else {
+                    content = generateLatex(exportData);
+                }
+
+                // Create and trigger download
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const blob = new Blob([content], { type: 'text/plain' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `knowledge-graph-export-${timestamp}.${format === 'markdown' ? 'md' : 'tex'}`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                console.error('Export failed:', error);
+                alert('Failed to generate export. Please try again.');
+            }
+        }
+
+        function generateMarkdown(data) {
+            const timestamp = new Date().toLocaleString();
+            let md = `# Knowledge Graph Export\n\nGenerated on: ${timestamp}\n\n`;
+            
+            // Summary section
+            md += '## Summary\n\n';
+            md += `This export contains ${data.nodes.length} nodes and ${data.edges.length} relationships.\n\n`;
+            
+            // Group nodes by type
+            const groupedNodes = data.nodes.reduce((acc, node) => {
+                if (!acc[node.group]) acc[node.group] = [];
+                acc[node.group].push(node);
+                return acc;
+            }, {});
+
+            // List nodes by type, highlighting selected ones
+            for (const [group, nodes] of Object.entries(groupedNodes)) {
+                md += `## ${group.charAt(0).toUpperCase() + group.slice(1)}s\n\n`;
+                nodes.forEach(node => {
+                    const prefix = data.selected.includes(node.id) ? '* ' : '- ';
+                    md += `${prefix}${node.label}\n`;
+                });
+                md += '\n';
+            }
+
+            // List relationships with context
+            md += '## Relationships\n\n';
+            const relationshipsByType = {};
+            
+            data.edges.forEach(edge => {
+                const fromNode = data.nodes.find(n => n.id === edge.from);
+                const toNode = data.nodes.find(n => n.id === edge.to);
+                
+                const relationType = `${fromNode.group} → ${toNode.group}`;
+                if (!relationshipsByType[relationType]) {
+                    relationshipsByType[relationType] = [];
+                }
+                
+                relationshipsByType[relationType].push(
+                    `${fromNode.label} → ${toNode.label}`
+                );
+            });
+
+            for (const [type, relationships] of Object.entries(relationshipsByType)) {
+                md += `### ${type}\n\n`;
+                relationships.forEach(rel => md += `- ${rel}\n`);
+                md += '\n';
+            }
+
+            return md;
+        }
+
+        function generateLatex(data) {
+            const timestamp = new Date().toLocaleString();
+            let tex = '\\documentclass{article}\n';
+            tex += '\\usepackage{tikz}\n';
+            tex += '\\usepackage{xcolor}\n';
+            tex += '\\usepackage{hyperref}\n';
+            tex += '\\begin{document}\n\n';
+            
+            // Title and metadata
+            tex += '\\title{Knowledge Graph Export}\n';
+            tex += `\\date{Generated on: ${timestamp}}\n`;
+            tex += '\\maketitle\n\n';
+            
+            // Summary
+            tex += '\\section{Summary}\n';
+            tex += `This export contains ${data.nodes.length} nodes and ${data.edges.length} relationships.\n\n`;
+            
+            // Visual representation
+            tex += '\\section{Graph Visualization}\n';
+            tex += '\\begin{center}\n';
+            tex += '\\begin{tikzpicture}[scale=0.8, transform shape,\n';
+            tex += '  node distance=3cm,\n';
+            tex += '  article/.style={circle, draw=blue!60, fill=blue!10, minimum size=1cm},\n';
+            tex += '  author/.style={circle, draw=red!60, fill=red!10, minimum size=1cm},\n';
+            tex += '  concept/.style={circle, draw=green!60, fill=green!10, minimum size=1cm},\n';
+            tex += '  selected/.style={double, double distance=2pt}]\n';
+            
+            // Calculate node positions in a circular layout
+            const radius = Math.max(data.nodes.length * 0.8, 5);
+            data.nodes.forEach((node, index) => {
+                const angle = (2 * Math.PI * index) / data.nodes.length;
+                const x = radius * Math.cos(angle);
+                const y = radius * Math.sin(angle);
+                const style = data.selected.includes(node.id) ? 
+                    `${node.group},selected` : node.group;
+                tex += `  \\node[${style}] (node${node.id}) at (${x.toFixed(2)},${y.toFixed(2)}) {${node.label}};\n`;
+            });
+            
+            // Draw edges with different styles
+            tex += '\n  % Relationships\n';
+            data.edges.forEach(edge => {
+                const style = data.selected.includes(edge.from) && data.selected.includes(edge.to) ?
+                    '[thick,->]' : '[->,dashed]';
+                tex += `  \\draw${style} (node${edge.from}) -- (node${edge.to});\n`;
+            });
+            
+            tex += '\\end{tikzpicture}\n';
+            tex += '\\end{center}\n\n';
+            
+            // Detailed listings
+            tex += '\\section{Detailed Listings}\n\n';
+            
+            // Group nodes by type
+            const groupedNodes = data.nodes.reduce((acc, node) => {
+                if (!acc[node.group]) acc[node.group] = [];
+                acc[node.group].push(node);
+                return acc;
+            }, {});
+            
+            // Create tables for each group
+            for (const [group, nodes] of Object.entries(groupedNodes)) {
+                tex += `\\subsection{${group.charAt(0).toUpperCase() + group.slice(1)}s}\n`;
+                tex += '\\begin{itemize}\n';
+                nodes.forEach(node => {
+                    const marker = data.selected.includes(node.id) ? 
+                        '\\textbf{\\item}' : '\\item';
+                    tex += `${marker} ${node.label}\n`;
+                });
+                tex += '\\end{itemize}\n\n';
+            }
+            
+            // Relationship listings by type
+            tex += '\\section{Relationships}\n';
+            const relationshipsByType = {};
+            data.edges.forEach(edge => {
+                const fromNode = data.nodes.find(n => n.id === edge.from);
+                const toNode = data.nodes.find(n => n.id === edge.to);
+                const type = `${fromNode.group} → ${toNode.group}`;
+                if (!relationshipsByType[type]) relationshipsByType[type] = [];
+                relationshipsByType[type].push(`${fromNode.label} → ${toNode.label}`);
+            });
+            
+            for (const [type, relationships] of Object.entries(relationshipsByType)) {
+                tex += `\\subsection{${type}}\n`;
+                tex += '\\begin{itemize}\n';
+                relationships.forEach(rel => tex += `\\item ${rel}\n`);
+                tex += '\\end{itemize}\n\n';
+            }
+            
+            tex += '\\end{document}\n';
+            return tex;
+        }
+    </script>
+</body>
+</html>
